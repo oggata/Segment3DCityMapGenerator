@@ -437,7 +437,7 @@
             reader.readAsText(file);
         }
         
-        // 3Dモデル読み込み（側面対応版）
+        // 3Dモデル読み込み（壁面自動生成版）
         function loadCityModel(data) {
             // 既存のメッシュをクリア
             Object.values(meshGroups).forEach(group => {
@@ -454,7 +454,7 @@
             
             console.log(`Loading ${data.meshes.length} meshes...`);
             
-            // メッシュを生成（側面付き立体モデル）
+            // メッシュを生成（壁面付き立体モデル）
             data.meshes.forEach((meshData, index) => {
                 if (index % 500 === 0) {
                     console.log(`  Processing mesh ${index}/${data.meshes.length}...`);
@@ -467,16 +467,95 @@
                 const colors = [];
                 const indices = [];
                 
-                // 頂点と色を直接使用（既に側面が含まれている）
-                meshData.vertices.forEach((v, i) => {
-                    vertices.push(v[0], v[1], v[2]);
-                    const c = meshData.colors[i];
-                    colors.push(c[0], c[1], c[2]);
-                });
+                const category = meshData.category || 'other';
+                const height = meshData.height || (categoryColors[category] ? categoryColors[category].height : 5);
                 
-                meshData.faces.forEach(f => {
-                    indices.push(f[0], f[1], f[2]);
-                });
+                // データに既に壁面が含まれているかチェック（頂点数で判定）
+                const hasWalls = meshData.vertices.length > 4 && meshData.vertices.some(v => v[1] === 0);
+                
+                if (hasWalls) {
+                    // 既に壁面がある場合はそのまま使用
+                    meshData.vertices.forEach((v, i) => {
+                        vertices.push(v[0], v[1], v[2]);
+                        const c = meshData.colors[i];
+                        colors.push(c[0], c[1], c[2]);
+                    });
+                    
+                    meshData.faces.forEach(f => {
+                        indices.push(f[0], f[1], f[2]);
+                    });
+                } else {
+                    // 壁面がない場合は動的に生成
+                    const topVertices = [];
+                    const bottomVertices = [];
+                    
+                    // 上面の頂点を追加
+                    meshData.vertices.forEach((v, i) => {
+                        const topIdx = vertices.length / 3;
+                        vertices.push(v[0], v[1], v[2]);
+                        topVertices.push(topIdx);
+                        
+                        const c = meshData.colors[i];
+                        colors.push(c[0], c[1], c[2]);
+                    });
+                    
+                    // 底面の頂点を追加（y=0）
+                    meshData.vertices.forEach((v, i) => {
+                        const bottomIdx = vertices.length / 3;
+                        vertices.push(v[0], 0, v[2]);
+                        bottomVertices.push(bottomIdx);
+                        
+                        // 壁面は少し暗くする
+                        const c = meshData.colors[i];
+                        colors.push(c[0] * 0.7, c[1] * 0.7, c[2] * 0.7);
+                    });
+                    
+                    // 上面の面
+                    meshData.faces.forEach(f => {
+                        indices.push(f[0], f[1], f[2]);
+                    });
+                    
+                    // 底面の面（反転）
+                    meshData.faces.forEach(f => {
+                        const offset = topVertices.length;
+                        indices.push(f[0] + offset, f[2] + offset, f[1] + offset);
+                    });
+                    
+                    // 壁面を生成（エッジを検出）
+                    const edges = new Set();
+                    const edgeCount = new Map();
+                    
+                    // 各面のエッジをカウント
+                    meshData.faces.forEach(f => {
+                        const edges_in_face = [
+                            [f[0], f[1]],
+                            [f[1], f[2]],
+                            [f[2], f[0]]
+                        ];
+                        
+                        edges_in_face.forEach(([a, b]) => {
+                            const key = a < b ? `${a},${b}` : `${b},${a}`;
+                            edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+                        });
+                    });
+                    
+                    // 境界エッジ（1回だけ使われる）を検出
+                    const boundaryEdges = [];
+                    edgeCount.forEach((count, key) => {
+                        if (count === 1) {
+                            const [a, b] = key.split(',').map(Number);
+                            boundaryEdges.push([a, b]);
+                        }
+                    });
+                    
+                    // 境界エッジごとに壁面を作成
+                    boundaryEdges.forEach(([a, b]) => {
+                        const offset = topVertices.length;
+                        // 2つの三角形で壁面を構成
+                        indices.push(a, b, b + offset);
+                        indices.push(a, b + offset, a + offset);
+                    });
+                }
                 
                 if (vertices.length === 0 || indices.length === 0) {
                     return;
@@ -500,9 +579,6 @@
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
                 
-                const category = meshData.category || 'other';
-                const height = meshData.height || (categoryColors[category] ? categoryColors[category].height : 5);
-                
                 mesh.userData = {
                     id: meshData.id,
                     category: meshData.category,
@@ -518,7 +594,7 @@
                 }
             });
             
-            console.log('✅ All meshes loaded with sides');
+            console.log('✅ All meshes loaded with walls');
             
             // 地面を追加（参照用）
             const groundGeometry = new THREE.PlaneGeometry(200, 200);

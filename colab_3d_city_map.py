@@ -364,13 +364,13 @@ for cat_name, cat_info in CITY_CATEGORIES.items():
 print(f"\n✅ Extracted {len(segments_data)} segments")
 
 """
-3Dメッシュ生成
+3Dメッシュ生成（壁面付き）
 """
 def create_3d_city_mesh(segments, image, resolution=2):
     height, width = image.shape[:2]
     meshes_data = []
     
-    print(f"\n🏗️ Generating 3D meshes (resolution={resolution}px)...")
+    print(f"\n🏗️ Generating 3D meshes with walls (resolution={resolution}px)...")
     
     for idx, segment in enumerate(segments):
         if idx % 100 == 0:
@@ -394,35 +394,89 @@ def create_3d_city_mesh(segments, image, resolution=2):
         colors = []
         step = resolution
         
+        # グリッドベースの頂点マップ（壁面生成用）
+        vertex_map = {}  # (grid_y, grid_x) -> vertex_index
+        building_height = segment['height'] * 0.5
+        
+        # 上面の頂点とグリッドを生成
         for sy in range(0, segment_area.shape[0] - step, step):
             for sx in range(0, segment_area.shape[1] - step, step):
                 if not segment_area[sy, sx]:
                     continue
                 
                 world_x = (x + sx - width/2) * 0.1
-                world_y = segment['height'] * 0.5
                 world_z = (y + sy - height/2) * 0.1
                 
+                grid_y = sy // step
+                grid_x = sx // step
+                
+                # 上面の4頂点（天井）
                 base_idx = len(vertices)
                 vertices.extend([
-                    [float(world_x), float(world_y), float(world_z)],
-                    [float(world_x + step*0.1), float(world_y), float(world_z)],
-                    [float(world_x + step*0.1), float(world_y), float(world_z + step*0.1)],
-                    [float(world_x), float(world_y), float(world_z + step*0.1)]
+                    [float(world_x), float(building_height), float(world_z)],
+                    [float(world_x + step*0.1), float(building_height), float(world_z)],
+                    [float(world_x + step*0.1), float(building_height), float(world_z + step*0.1)],
+                    [float(world_x), float(building_height), float(world_z + step*0.1)]
                 ])
                 
+                # 底面の4頂点（地面）
+                vertices.extend([
+                    [float(world_x), 0.0, float(world_z)],
+                    [float(world_x + step*0.1), 0.0, float(world_z)],
+                    [float(world_x + step*0.1), 0.0, float(world_z + step*0.1)],
+                    [float(world_x), 0.0, float(world_z + step*0.1)]
+                ])
+                
+                # 色情報
                 if sy < segment_image.shape[0] and sx < segment_image.shape[1]:
                     color = segment_image[sy, sx] / 255.0
                     color_list = [float(color[0]), float(color[1]), float(color[2])]
                 else:
                     color_list = [0.5, 0.5, 0.5]
-                colors.extend([color_list] * 4)
                 
-                if base_idx + 3 <= len(vertices):
-                    faces.extend([
-                        [base_idx, base_idx+1, base_idx+2],
-                        [base_idx, base_idx+2, base_idx+3]
-                    ])
+                # 少し暗い色を壁面用に作成
+                wall_color = [c * 0.7 for c in color_list]
+                colors.extend([color_list] * 4)  # 上面
+                colors.extend([wall_color] * 4)  # 底面
+                
+                # 上面（天井）
+                faces.extend([
+                    [base_idx, base_idx+1, base_idx+2],
+                    [base_idx, base_idx+2, base_idx+3]
+                ])
+                
+                # 下面（地面）- 通常は見えないが追加
+                faces.extend([
+                    [base_idx+4, base_idx+6, base_idx+5],
+                    [base_idx+4, base_idx+7, base_idx+6]
+                ])
+                
+                # 壁面チェック：隣接グリッドが空なら壁を作る
+                neighbors = [
+                    ((grid_y, grid_x-1), base_idx+0, base_idx+4, base_idx+7, base_idx+3),  # 左壁
+                    ((grid_y, grid_x+1), base_idx+1, base_idx+2, base_idx+6, base_idx+5),  # 右壁
+                    ((grid_y-1, grid_x), base_idx+0, base_idx+1, base_idx+5, base_idx+4),  # 前壁
+                    ((grid_y+1, grid_x), base_idx+3, base_idx+7, base_idx+6, base_idx+2),  # 後壁
+                ]
+                
+                for (ny, nx), v0, v1, v2, v3 in neighbors:
+                    # 隣接位置が範囲外またはセグメント外なら壁を生成
+                    neighbor_sy = ny * step
+                    neighbor_sx = nx * step
+                    needs_wall = False
+                    
+                    if (neighbor_sy < 0 or neighbor_sy >= segment_area.shape[0] or 
+                        neighbor_sx < 0 or neighbor_sx >= segment_area.shape[1]):
+                        needs_wall = True
+                    elif not segment_area[neighbor_sy, neighbor_sx]:
+                        needs_wall = True
+                    
+                    if needs_wall:
+                        # 壁面を追加（2つの三角形）
+                        faces.extend([
+                            [v0, v1, v2],
+                            [v0, v2, v3]
+                        ])
         
         if len(vertices) > 0:
             meshes_data.append({
@@ -439,10 +493,11 @@ def create_3d_city_mesh(segments, image, resolution=2):
                     float((y + h/2 - height/2) * 0.1)
                 ],
                 'bbox': [int(x), int(y), int(w), int(h)],
-                'area': float(segment['area'])
+                'area': float(segment['area']),
+                'height': float(segment['height'])
             })
     
-    print(f"✅ Generated {len(meshes_data)} meshes")
+    print(f"✅ Generated {len(meshes_data)} meshes with walls")
     return meshes_data
 
 meshes = create_3d_city_mesh(segments_data, resized_image, MESH_RESOLUTION)
