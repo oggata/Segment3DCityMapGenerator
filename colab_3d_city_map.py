@@ -25,19 +25,28 @@ print(f"CUDA available: {torch.cuda.is_available()}")
 🎛️ 調整可能なパラメータ
 """
 # ============================================================
-MAX_IMAGE_SIZE = 1280      # 入力画像の最大サイズ (640-2048)
-USE_TILING = True          # タイル分割処理
-TILE_SIZE = 120            # タイルサイズ
-TILE_OVERLAP = 32          # タイル間の重複
-MIN_SEGMENT_AREA = 20      # 最小セグメント面積 (20-200)
-MESH_RESOLUTION = 1        # メッシュ解像度 (1-4、小さいほど高密度)
-APPLY_MORPHOLOGY = True    # モルフォロジー処理
-MORPHOLOGY_KERNEL = 5      # カーネルサイズ
+# 📸 画像処理パラメータ
+MAX_IMAGE_SIZE = 1280      # 入力画像の最大サイズ (640-2048) ⬆️大きいほど精度向上
+USE_TILING = True          # タイル分割処理（精度向上に重要）
+TILE_SIZE = 640            # タイルサイズ (120-640) ⬆️大きいほど精度向上
+TILE_OVERLAP = 64          # タイル間の重複 (32-128) ⬆️大きいほど境界が綺麗
 
-# 🆕 境界検出パラメータ
+# 🏗️ メッシュ生成パラメータ
+MIN_SEGMENT_AREA = 50      # 最小セグメント面積 (20-200) ⬆️増やすとセグメント数減少
+MESH_RESOLUTION = 2        # メッシュ解像度 (1-4、大きいほど粗くて軽量) ⬆️増やすとファイルサイズ減少
+
+# 🔧 後処理パラメータ
+APPLY_MORPHOLOGY = True    # モルフォロジー処理（ノイズ除去）
+MORPHOLOGY_KERNEL = 7      # カーネルサイズ (3-9) ⬆️大きいほどノイズ除去が強力
+
+# 🔍 境界検出パラメータ
 DETECT_BOUNDARIES = True   # 境界領域を検出
-BOUNDARY_THICKNESS = 5     # 境界の太さ（ピクセル）1-5
+BOUNDARY_THICKNESS = 3     # 境界の太さ（ピクセル）1-5 ⬇️小さくすると建物と道路の混合を軽減
 BOUNDARY_AS_SEPARATOR = True  # 境界を「その他」として分離
+
+# 🎯 精度向上設定（道路と建物の混合を防ぐ）
+APPLY_CLASS_SMOOTHING = True   # クラスごとの平滑化
+CLASS_SMOOTHING_ITERATIONS = 2  # 平滑化の反復回数 (1-3)
 # ============================================================
 
 print(f"\n📐 Settings: MAX_SIZE={MAX_IMAGE_SIZE}, MIN_AREA={MIN_SEGMENT_AREA}, MESH_RES={MESH_RESOLUTION}")
@@ -64,25 +73,30 @@ print("✅ Model loaded!")
 """
 ADE20K_TO_CITY_MAPPING = {
     'road': 'road', 'street': 'road', 'path': 'road', 'sidewalk': 'road',
-    'building': 'commercial', 'house': 'residential', 'skyscraper': 'commercial',
+    'building': 'building_c', 'house': 'building_a', 'skyscraper': 'building_e',
+    'highrise': 'building_e', 'tower': 'building_e',
+    'office': 'building_d', 'shop': 'building_b', 'store': 'building_b',
+    'apartment': 'building_c', 'hotel': 'building_d',
     'tree': 'forest', 'plant': 'forest', 'palm': 'forest',
     'grass': 'park', 'field': 'park', 'flower': 'park',
     'water': 'water', 'sea': 'water', 'river': 'water', 'lake': 'water',
     'earth': 'bare_land', 'sand': 'bare_land', 'ground': 'bare_land',
-    'parking lot': 'industrial', 'stadium': 'commercial',
+    'parking lot': 'infrastructure', 'stadium': 'building_d',
 }
 
 CITY_CATEGORIES = {
     'road': {'label': '道路', 'color': (128, 64, 128), 'height': 0, 'semantic_id': 0},
-    'forest': {'label': '森林', 'color': (34, 139, 34), 'height': 15, 'semantic_id': 1},
-    'park': {'label': '公園/緑地', 'color': (144, 238, 144), 'height': 5, 'semantic_id': 2},
+    'forest': {'label': '森林', 'color': (34, 139, 34), 'height': 1.5, 'semantic_id': 1},
+    'park': {'label': '公園/緑地', 'color': (144, 238, 144), 'height': 0.5, 'semantic_id': 2},
     'water': {'label': '水域', 'color': (30, 144, 255), 'height': 0, 'semantic_id': 3},
-    'residential': {'label': '住宅地', 'color': (255, 160, 122), 'height': 8, 'semantic_id': 4},
-    'commercial': {'label': '商業施設', 'color': (220, 20, 60), 'height': 20, 'semantic_id': 5},
-    'industrial': {'label': '工業地域', 'color': (169, 169, 169), 'height': 12, 'semantic_id': 6},
-    'bare_land': {'label': '空き地', 'color': (210, 180, 140), 'height': 1, 'semantic_id': 7},
-    'infrastructure': {'label': 'インフラ', 'color': (100, 100, 100), 'height': 10, 'semantic_id': 9},
-    'other': {'label': 'その他/境界', 'color': (80, 80, 80), 'height': 0, 'semantic_id': 8}  # 暗いグレーに変更
+    'building_a': {'label': '建物A（小）', 'color': (255, 200, 150), 'height': 0.6, 'semantic_id': 4},
+    'building_b': {'label': '建物B（中小）', 'color': (255, 160, 122), 'height': 1.0, 'semantic_id': 5},
+    'building_c': {'label': '建物C（中）', 'color': (240, 120, 90), 'height': 1.5, 'semantic_id': 6},
+    'building_d': {'label': '建物D（中大）', 'color': (220, 80, 60), 'height': 2.2, 'semantic_id': 7},
+    'building_e': {'label': '建物E（大）', 'color': (200, 40, 40), 'height': 3.0, 'semantic_id': 8},
+    'bare_land': {'label': '空き地', 'color': (210, 180, 140), 'height': 0.1, 'semantic_id': 9},
+    'infrastructure': {'label': 'インフラ', 'color': (100, 100, 100), 'height': 0.8, 'semantic_id': 10},
+    'other': {'label': 'その他/境界', 'color': (80, 80, 80), 'height': 0, 'semantic_id': 11}
 }
 
 id2label = model.config.id2label
@@ -189,19 +203,32 @@ def map_ade20k_to_city(class_id):
     if class_id not in id2label:
         return 'other'
     class_name = id2label[class_id].lower()
+    
+    # マッピング辞書を最初にチェック
     for ade_name, city_cat in ADE20K_TO_CITY_MAPPING.items():
         if ade_name in class_name:
             return city_cat
-    if any(w in class_name for w in ['building', 'house']):
-        return 'commercial'
-    elif any(w in class_name for w in ['tree', 'forest']):
+    
+    # 建物の詳細分類（サイズに基づく）
+    if any(w in class_name for w in ['skyscraper', 'highrise', 'tower']):
+        return 'building_e'  # 大型建物
+    elif any(w in class_name for w in ['office', 'hotel', 'commercial', 'stadium']):
+        return 'building_d'  # 中大型建物
+    elif any(w in class_name for w in ['building', 'apartment']):
+        return 'building_c'  # 中型建物
+    elif any(w in class_name for w in ['shop', 'store', 'market']):
+        return 'building_b'  # 中小型建物
+    elif any(w in class_name for w in ['house', 'home', 'shed', 'hut']):
+        return 'building_a'  # 小型建物
+    elif any(w in class_name for w in ['tree', 'forest', 'vegetation']):
         return 'forest'
-    elif any(w in class_name for w in ['grass', 'lawn']):
+    elif any(w in class_name for w in ['grass', 'lawn', 'field']):
         return 'park'
-    elif any(w in class_name for w in ['road', 'street']):
+    elif any(w in class_name for w in ['road', 'street', 'path', 'sidewalk']):
         return 'road'
-    elif any(w in class_name for w in ['water', 'ocean']):
+    elif any(w in class_name for w in ['water', 'ocean', 'sea', 'river', 'lake']):
         return 'water'
+    
     return 'other'
 
 print("\n🗺️ Mapping classes...")
@@ -215,6 +242,48 @@ for class_id in np.unique(predicted_segmentation):
     city_segmentation[mask] = semantic_id
     pixel_count = np.sum(mask)
     category_pixel_counts[city_category] = category_pixel_counts.get(city_category, 0) + pixel_count
+
+"""
+クラスごとの平滑化処理（道路と建物の混合を防ぐ）
+"""
+if APPLY_CLASS_SMOOTHING:
+    from scipy.ndimage import median_filter
+    from scipy.stats import mode as stats_mode
+    print("\n🎯 Applying class smoothing to improve accuracy...")
+    
+    for iteration in range(CLASS_SMOOTHING_ITERATIONS):
+        # メディアンフィルタで各ピクセルを周囲の多数派クラスに置き換え
+        smoothed = median_filter(city_segmentation, size=3)
+        
+        # 道路と建物の境界を特に処理
+        road_id = CITY_CATEGORIES['road']['semantic_id']
+        building_ids = [
+            CITY_CATEGORIES['building_a']['semantic_id'],
+            CITY_CATEGORIES['building_b']['semantic_id'],
+            CITY_CATEGORIES['building_c']['semantic_id'],
+            CITY_CATEGORIES['building_d']['semantic_id'],
+            CITY_CATEGORIES['building_e']['semantic_id']
+        ]
+        
+        # 道路エリア内の孤立した建物ピクセルを道路に変換
+        h, w = city_segmentation.shape
+        for y in range(2, h - 2):
+            for x in range(2, w - 2):
+                current_id = city_segmentation[y, x]
+                
+                # 建物ピクセルの場合のみチェック
+                if current_id in building_ids:
+                    neighborhood = city_segmentation[y-2:y+3, x-2:x+3]
+                    road_count = np.sum(neighborhood == road_id)
+                    
+                    # 25ピクセル中12以上が道路なら道路に変換
+                    if road_count > 12:
+                        smoothed[y, x] = road_id
+        
+        city_segmentation = smoothed
+        print(f"  Iteration {iteration + 1}/{CLASS_SMOOTHING_ITERATIONS} completed")
+    
+    print("✅ Class smoothing completed")
 
 """
 境界検出と分離処理

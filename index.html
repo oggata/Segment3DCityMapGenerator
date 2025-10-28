@@ -290,15 +290,21 @@
         // カテゴリカラー定義（高さ情報も追加）
         const categoryColors = {
             'road': { color: 0x804080, label: '道路', height: 0 },
-            'forest': { color: 0x228B22, label: '森林', height: 15/10 },
-            'park': { color: 0x90EE90, label: '公園/緑地', height: 5/10 },
-            'water': { color: 0x1E90FF, label: '水域', height: -2/10 },
-            'residential': { color: 0xFFA07A, label: '住宅地', height: 8/10 },
-            'commercial': { color: 0xDC143C, label: '商業施設', height: 20/10 },
-            'industrial': { color: 0xA9A9A9, label: '工業地域', height: 12/10 },
-            'bare_land': { color: 0xD2B48C, label: '空き地', height: 1/10 },
-            'infrastructure': { color: 0x646464, label: 'インフラ', height: 10/10 },
-            'other': { color: 0x505050, label: 'その他/境界', height: 0/10 }
+            'forest': { color: 0x228B22, label: '森林', height: 1.5 },
+            'park': { color: 0x90EE90, label: '公園/緑地', height: 0.5 },
+            'water': { color: 0x1E90FF, label: '水域', height: 0 },
+            'building_a': { color: 0xFFC896, label: '建物A（小）', height: 0.6 },
+            'building_b': { color: 0xFFA07A, label: '建物B（中小）', height: 1.0 },
+            'building_c': { color: 0xF0785A, label: '建物C（中）', height: 1.5 },
+            'building_d': { color: 0xDC503C, label: '建物D（中大）', height: 2.2 },
+            'building_e': { color: 0xC82828, label: '建物E（大）', height: 3.0 },
+            'bare_land': { color: 0xD2B48C, label: '空き地', height: 0.1 },
+            'infrastructure': { color: 0x646464, label: 'インフラ', height: 0.8 },
+            'other': { color: 0x505050, label: 'その他/境界', height: 0 },
+            // 後方互換性のため旧カテゴリも残す
+            'residential': { color: 0xFFA07A, label: '建物B（中小）', height: 1.0 },
+            'commercial': { color: 0xDC503C, label: '建物D（中大）', height: 2.2 },
+            'industrial': { color: 0xF0785A, label: '建物C（中）', height: 1.5 }
         };
         
         // 初期化
